@@ -8,34 +8,64 @@ from openpyxl.utils import get_column_letter
 from openpyxl.styles import Alignment, Font, PatternFill
 from datetime import datetime
 import os
+import concurrent.futures
+import threading
 
-class BulkDataExtraction:
+class OptimizedBulkDataExtraction:
     def __init__(self, csv_file_path, output_file="bulk_drug_data.xlsx"):
         self.csv_file_path = csv_file_path
         self.output_file = output_file
         self.processed_count = 0
         self.failed_urls = []
+        self.session = requests.Session()
+        self.lock = threading.Lock()
         
-    def get_soup(self, url):
-        """Get soup object for a URL with error handling"""
+        # Optimize session
+        self.session.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
+            "Accept-Encoding": "gzip, deflate",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "DNT": "1",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1"
+        })
+        
+        # Connection pooling
+        adapter = requests.adapters.HTTPAdapter(
+            pool_connections=20,
+            pool_maxsize=20,
+            max_retries=2
+        )
+        self.session.mount('http://', adapter)
+        self.session.mount('https://', adapter)
+        
+    def get_current_excel_row_count(self):
+        """Get current row count from existing Excel file"""
         try:
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36",
-                "Accept-Encoding": "gzip, deflate",
-                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                "DNT": "1",
-                "Connection": "close",
-                "Upgrade-Insecure-Requests": "1"
-            }
-            page = requests.get(url, headers=headers, timeout=30)
+            if os.path.exists(self.output_file):
+                wb = load_workbook(self.output_file, read_only=True)
+                ws = wb.active
+                row_count = ws.max_row - 1  # Subtract 1 for header row
+                wb.close()
+                return row_count
+            return 0
+        except Exception as e:
+            print(f"❌ Error reading Excel file: {str(e)}")
+            return 0
+
+    def get_soup(self, url):
+        """Optimized soup object retrieval with shorter timeout"""
+        try:
+            page = self.session.get(url, timeout=10)  # Reduced timeout
             page.raise_for_status()
             return BeautifulSoup(page.content, 'html.parser')
         except Exception as e:
-            print(f"❌ Failed to fetch {url}: {str(e)}")
+            with self.lock:
+                print(f"❌ Failed to fetch {url}: {str(e)}")
             return None
 
     def extract_single_url_data(self, url):
-        """Extract all data for a single URL"""
+        """Extract all data for a single URL - optimized"""
         soup = self.get_soup(url)
         if not soup:
             return None
@@ -55,9 +85,11 @@ class BulkDataExtraction:
             }
             return data
         except Exception as e:
-            print(f"❌ Error extracting data from {url}: {str(e)}")
+            with self.lock:
+                print(f"❌ Error extracting data from {url}: {str(e)}")
             return None
 
+    # All the extraction methods remain the same
     def prescription(self, soup):
         outer_div = soup.find("div", class_="DrugHeader__prescription-req___34WVy")
         if outer_div:
@@ -237,7 +269,6 @@ class BulkDataExtraction:
         ws = wb.active
         ws.title = "Drug Data"
 
-        # Headers - URL as first column
         headers = [
             "URL",
             "Prescription Required",
@@ -262,7 +293,6 @@ class BulkDataExtraction:
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center", vertical="center")
 
-        # Set column widths
         column_widths = [50, 20, 30, 40, 60, 60, 60, 60, 60, 60]
         for i, width in enumerate(column_widths, 1):
             ws.column_dimensions[get_column_letter(i)].width = width
@@ -271,41 +301,61 @@ class BulkDataExtraction:
         print(f"✅ Created Excel file: {self.output_file}")
 
     def append_data_to_excel(self, data_batch):
-        """Append batch of data to existing Excel file"""
-        try:
-            wb = load_workbook(self.output_file)
-            ws = wb.active
-            
-            for data in data_batch:
-                if data:  # Only add if data extraction was successful
-                    row_data = [
-                        data['url'],
-                        data['prescription'],
-                        data['salt_composition'],
-                        data['side_effects'],
-                        data['product_description'],
-                        data['faqs'],
-                        data['how_drug_works'],
-                        data['drug_interactions'],
-                        data['how_to_use'],
-                        data['safety_advice']
-                    ]
-                    ws.append(row_data)
-                    
-                    # Format the new row
-                    row_num = ws.max_row
-                    for cell in ws[row_num]:
-                        cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
-                    ws.row_dimensions[row_num].height = 100
-            
-            wb.save(self.output_file)
-            print(f"✅ Saved batch to Excel. Total rows: {ws.max_row - 1}")
-            
-        except Exception as e:
-            print(f"❌ Error saving to Excel: {str(e)}")
+        """Append batch of data to existing Excel file with thread safety"""
+        with self.lock:
+            try:
+                wb = load_workbook(self.output_file)
+                ws = wb.active
+                
+                for data in data_batch:
+                    if data:
+                        row_data = [
+                            data['url'],
+                            data['prescription'],
+                            data['salt_composition'],
+                            data['side_effects'],
+                            data['product_description'],
+                            data['faqs'],
+                            data['how_drug_works'],
+                            data['drug_interactions'],
+                            data['how_to_use'],
+                            data['safety_advice']
+                        ]
+                        ws.append(row_data)
+                        
+                        row_num = ws.max_row
+                        for cell in ws[row_num]:
+                            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+                        ws.row_dimensions[row_num].height = 100
+                
+                wb.save(self.output_file)
+                print(f"✅ Saved batch to Excel. Total rows: {ws.max_row - 1}")
+                
+            except Exception as e:
+                print(f"❌ Error saving to Excel: {str(e)}")
 
-    def process_urls_from_csv(self, start_from=0, has_header=False):
-        """Main method to process URLs from CSV with breaks"""
+    def process_urls_batch(self, urls_batch):
+        """Process a batch of URLs and return results"""
+        results = []
+        for url in urls_batch:
+            data = self.extract_single_url_data(url)
+            if data:
+                results.append(data)
+                with self.lock:
+                    self.processed_count += 1
+            else:
+                with self.lock:
+                    self.failed_urls.append(url)
+        return results
+
+    def process_urls_from_csv_optimized(self, start_from=None, has_header=False, batch_size=50, max_workers=5):
+        """Optimized main method with multithreading and auto-continue"""
+        
+        # Check existing Excel file and auto-determine start point
+        if start_from is None:
+            current_rows = self.get_current_excel_row_count()
+            start_from = current_rows
+            print(f"🔄 Auto-detected: Excel file has {current_rows} rows. Starting from row {start_from + 1}")
         
         # Read CSV file
         try:
@@ -313,7 +363,6 @@ class BulkDataExtraction:
                 df = pd.read_csv(self.csv_file_path)
                 print(f"📊 Loaded {len(df)} URLs from CSV (with header)")
                 
-                # Detect URL column (assuming first column or column named 'url', 'URL', 'urls', etc.)
                 url_column = None
                 possible_url_columns = ['url', 'URL', 'urls', 'URLs', 'link', 'links']
                 
@@ -323,76 +372,89 @@ class BulkDataExtraction:
                         break
                 
                 if url_column is None:
-                    url_column = df.columns[0]  # Use first column as default
+                    url_column = df.columns[0]
                     
                 urls = df[url_column].tolist()
                 print(f"🔗 Using column '{url_column}' for URLs")
                 
             else:
-                # Read CSV without header - data starts from index 0
                 df = pd.read_csv(self.csv_file_path, header=None)
-                print(f"📊 Loaded {len(df)} URLs from CSV (no header - data starts from index 0)")
-                
-                # Use first column (index 0) for URLs
+                print(f"📊 Loaded {len(df)} URLs from CSV (no header)")
                 urls = df[0].tolist()
-                print(f"🔗 Using first column for URLs (no header detected)")
+                print(f"🔗 Using first column for URLs")
             
         except Exception as e:
             print(f"❌ Error reading CSV: {str(e)}")
             return
 
-        # Create Excel file with headers
-        self.create_excel_with_headers()
+        # Create Excel file if it doesn't exist
+        if not os.path.exists(self.output_file):
+            self.create_excel_with_headers()
         
         # Start processing from specified index
         urls = urls[start_from:]
         total_urls = len(urls)
-        print(f"🚀 Starting to process {total_urls} URLs...")
+        print(f"🚀 Starting to process {total_urls} URLs from index {start_from} with {max_workers} threads...")
+        print(f"⚡ Batch size: {batch_size}, No breaks enabled for maximum speed!")
         
-        batch_data = []
+        # Process in batches with threading
+        start_time = time.time()
         
-        for i, url in enumerate(urls):
-            current_index = start_from + i + 1
+        for i in range(0, total_urls, batch_size):
+            batch_urls = urls[i:i+batch_size]
+            current_batch_num = i // batch_size + 1
+            total_batches = (total_urls + batch_size - 1) // batch_size
             
-            print(f"🔄 Processing URL {current_index}/{start_from + total_urls}: {url}")
+            print(f"🔄 Processing batch {current_batch_num}/{total_batches} ({len(batch_urls)} URLs)")
             
-            # Extract data for this URL
-            data = self.extract_single_url_data(url)
-            
-            if data:
-                batch_data.append(data)
-                self.processed_count += 1
-            else:
-                self.failed_urls.append(url)
-            
-            # Save every 30 URLs and take 3 second break
-            if current_index % 30 == 0:
-                if batch_data:
-                    self.append_data_to_excel(batch_data)
-                    batch_data = []
+            # Use ThreadPoolExecutor for parallel processing
+            batch_results = []
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Split batch into smaller chunks for each thread
+                chunk_size = max(1, len(batch_urls) // max_workers)
+                chunks = [batch_urls[j:j+chunk_size] for j in range(0, len(batch_urls), chunk_size)]
                 
-                print("⏸️ Taking 3 second break after 30 URLs...")
-                time.sleep(3)
-            
-            # Take 5 minute break every 10k URLs
-            if current_index % 10000 == 0:
-                print(f"🕐 Processed {current_index} URLs. Taking 5 minute break...")
-                print(f"📈 Success rate: {self.processed_count}/{current_index} ({(self.processed_count/current_index)*100:.1f}%)")
-                time.sleep(300)  # 5 minutes = 300 seconds
+                # Submit all chunks
+                future_to_chunk = {executor.submit(self.process_urls_batch, chunk): chunk for chunk in chunks}
                 
-        # Save any remaining data
-        if batch_data:
-            self.append_data_to_excel(batch_data)
+                # Collect results
+                for future in concurrent.futures.as_completed(future_to_chunk):
+                    try:
+                        chunk_results = future.result()
+                        batch_results.extend(chunk_results)
+                    except Exception as e:
+                        print(f"❌ Error processing chunk: {str(e)}")
             
-        # Print final statistics
-        print("\n" + "="*50)
+            # Save batch results
+            if batch_results:
+                self.append_data_to_excel(batch_results)
+            
+            # Progress update
+            processed_so_far = start_from + min(i + batch_size, total_urls)
+            elapsed_time = time.time() - start_time
+            avg_time_per_url = elapsed_time / min(i + batch_size, total_urls) if (i + batch_size) > 0 else 0
+            
+            print(f"📈 Progress: {processed_so_far} URLs processed")
+            print(f"⏱️ Average time per URL: {avg_time_per_url:.2f}s")
+            
+            if total_urls - (i + batch_size) > 0:
+                estimated_remaining = (total_urls - (i + batch_size)) * avg_time_per_url
+                print(f"🕐 Estimated time remaining: {estimated_remaining/60:.1f} minutes")
+        
+        # Final statistics
+        total_time = time.time() - start_time
+        print("\n" + "="*60)
         print("🎉 PROCESSING COMPLETE!")
         print(f"📊 Total URLs processed: {self.processed_count}")
         print(f"❌ Failed URLs: {len(self.failed_urls)}")
-        print(f"✅ Success rate: {(self.processed_count/(self.processed_count + len(self.failed_urls)))*100:.1f}%")
+        if self.processed_count + len(self.failed_urls) > 0:
+            success_rate = (self.processed_count/(self.processed_count + len(self.failed_urls)))*100
+            print(f"✅ Success rate: {success_rate:.1f}%")
+        print(f"⏱️ Total time taken: {total_time/60:.1f} minutes")
+        print(f"⚡ Average speed: {(self.processed_count + len(self.failed_urls))/total_time:.2f} URLs/second")
         print(f"💾 Data saved to: {self.output_file}")
         
-        # Save failed URLs to a separate file
+        # Save failed URLs
         if self.failed_urls:
             failed_df = pd.DataFrame(self.failed_urls, columns=['failed_urls'])
             failed_file = f"failed_urls_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
@@ -402,15 +464,16 @@ class BulkDataExtraction:
 
 # Usage
 if __name__ == "__main__":
-    # Initialize the bulk processor
-    csv_file = r"C:\Users\MICILMEDS\Battel_with_Codes\WebScrapying_Scratch\URL.csv"
+    # Initialize the optimized bulk processor
+    csv_file = "URL.csv"  # Relative path - place CSV file in same directory as script
     
-    bulk_extractor = BulkDataExtraction(
+    bulk_extractor = OptimizedBulkDataExtraction(
         csv_file_path=csv_file,
         output_file="bulk_drug_data.xlsx"
     )
     
     # Start processing - CSV has no header, data starts from index 0
     bulk_extractor.process_urls_from_csv(start_from=0, has_header=False)
+    
     # If your CSV had headers, you would use:
     # bulk_extractor.process_urls_from_csv(start_from=0, has_header=True)
