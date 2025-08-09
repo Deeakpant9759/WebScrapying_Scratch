@@ -412,6 +412,5 @@ if __name__ == "__main__":
     
     # Start processing - CSV has no header, data starts from index 0
     bulk_extractor.process_urls_from_csv(start_from=0, has_header=False)
-    
     # If your CSV had headers, you would use:
     # bulk_extractor.process_urls_from_csv(start_from=0, has_header=True)

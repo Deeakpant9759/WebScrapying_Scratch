@@ -15,7 +15,7 @@ def get_page_html(url):
 def Extract_Prouct_info(url):
     print(f"Extracting the Product Info of {url}")
     data = get_page_html(url=url)
-    return data
+    soup = bs4.BeautifulSoup(data,'lxml')
 
 
 if __name__ == "__main__":
