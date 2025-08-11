@@ -9,6 +9,7 @@ request_headers = {
     "User-Agent": useragent,
     "Accept-Language": "en-US,en;q=0.5"
 }
+#https://myaccount.google.com/lesssecureapps
 
 # Get job data from RemoteOK API
 def get_jobs():
