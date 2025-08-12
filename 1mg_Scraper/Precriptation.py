@@ -380,7 +380,7 @@ class UltraFastBulkDataExtraction:
                     print(f"⚠️ Error processing {url}: {str(e)}")
         return results
 
-    def ultra_fast_process(self, start_from=50082, batch_size=100, max_workers=10):
+    def ultra_fast_process(self, start_from=61470, batch_size=100, max_workers=10):
         """Ultra-fast processing with threading"""
         
         print(f"🚀 Starting ultra-fast processing from row {start_from + 1}")
@@ -507,9 +507,9 @@ if __name__ == "__main__":
     current_rows = extractor.get_current_excel_row_count()
     print(f"📊 Current Excel file has {current_rows} rows of data")
     
-    # Start processing from row 50082 (continuing from where it left off)
+    # Start processing from row 61470 (continuing from where it left off)
     extractor.ultra_fast_process(
-        start_from=50082,     # Continue from row 50082
+        start_from=61470,     # Continue from row 61470
         batch_size=100,       # Process 100 URLs per batch
         max_workers=10        # Use 10 threads
     )
