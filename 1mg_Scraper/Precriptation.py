@@ -12,6 +12,7 @@ import concurrent.futures
 import threading
 from requests.adapters import HTTPAdapter
 from concurrent.futures import ThreadPoolExecutor
+import csv
 
 class UltraFastBulkDataExtraction:
     def __init__(self, csv_file_path, output_file="bulk_drug_data.xlsx"):
@@ -380,79 +381,121 @@ class UltraFastBulkDataExtraction:
                     print(f"⚠️ Error processing {url}: {str(e)}")
         return results
 
-    def ultra_fast_process(self, start_from=61470, batch_size=100, max_workers=10):
-        """Ultra-fast processing with threading"""
-        
+    def create_csv_with_headers(self, csv_file):
+        """Create CSV file with headers if it doesn't exist"""
+        if os.path.exists(csv_file):
+            print(f"📊 CSV file already exists: {csv_file}")
+            return
+        headers = [
+            "URL",
+            "Prescription Required",
+            "Salt Composition", 
+            "Side Effects",
+            "Product Description",
+            "FAQs",
+            "How Drug Works",
+            "Drug Interactions",
+            "How to Use",
+            "Safety Advice"
+        ]
+        with open(csv_file, mode='w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            writer.writerow(headers)
+        print(f"✅ Created CSV file: {csv_file}")
+
+    def append_data_to_csv_batch(self, data_batch, csv_file):
+        """Append batch of data to CSV file"""
+        with self.lock:
+            try:
+                with open(csv_file, mode='a', newline='', encoding='utf-8') as f:
+                    writer = csv.writer(f)
+                    for data in data_batch:
+                        if data:
+                            row_data = [
+                                data['url'],
+                                data['prescription'],
+                                data['salt_composition'],
+                                data['side_effects'],
+                                data['product_description'],
+                                data['faqs'],
+                                data['how_drug_works'],
+                                data['drug_interactions'],
+                                data['how_to_use'],
+                                data['safety_advice']
+                            ]
+                            writer.writerow(row_data)
+                print(f"✅ Saved batch to CSV. Total rows written: {self.processed_count}")
+            except Exception as e:
+                print(f"❌ Error saving to CSV: {str(e)}")
+
+    def ultra_fast_process(self, start_from=114990, batch_size=100, max_workers=10, limit=30000, csv_file="bulk_drug_114990_30k.csv"):
+        """Ultra-fast processing with threading, saving to CSV"""
         print(f"🚀 Starting ultra-fast processing from row {start_from + 1}")
-        
+
         # Read CSV efficiently
         try:
             print(f"📊 Reading CSV file: {self.csv_file_path}")
             df = pd.read_csv(self.csv_file_path, header=None)
             all_urls = df[0].dropna().tolist()
-            
-            # Skip to start_from position
-            urls = all_urls[start_from:]
+            # Skip to start_from position and limit to next 30,000
+            urls = all_urls[start_from:start_from+limit]
             total_urls = len(urls)
             print(f"📈 Loaded {total_urls} URLs to process (starting from row {start_from + 1})")
-            
         except Exception as e:
             print(f"❌ Error reading CSV: {str(e)}")
             return
 
-        # Create Excel file if needed
-        if not os.path.exists(self.output_file):
-            self.create_excel_with_headers()
+        # Create CSV file if needed
+        if not os.path.exists(csv_file):
+            self.create_csv_with_headers(csv_file)
 
         print(f"⚡ Processing with {max_workers} threads, batch size: {batch_size}")
-        
+
         start_time = time.time()
         save_counter = 0
         pending_data = []
-        
+
         # Process in batches
         for i in range(0, total_urls, batch_size):
             batch_urls = urls[i:i+batch_size]
             batch_num = i // batch_size + 1
             total_batches = (total_urls + batch_size - 1) // batch_size
-            
+
             print(f"\n🔥 Processing Batch {batch_num}/{total_batches} ({len(batch_urls)} URLs)")
             batch_start = time.time()
-            
+
             # Split into chunks for threading
             chunk_size = max(1, len(batch_urls) // max_workers)
             chunks = [batch_urls[j:j+chunk_size] for j in range(0, len(batch_urls), chunk_size)]
-            
+
             batch_results = []
             with ThreadPoolExecutor(max_workers=max_workers) as executor:
                 future_to_chunk = {executor.submit(self.process_urls_chunk, chunk): chunk for chunk in chunks}
-                
                 for future in concurrent.futures.as_completed(future_to_chunk):
                     try:
                         chunk_results = future.result(timeout=120)
                         batch_results.extend(chunk_results)
                     except Exception as e:
                         print(f"⚠️ Chunk error: {str(e)}")
-            
+
             # Add to pending data
             pending_data.extend(batch_results)
             save_counter += len(batch_results)
-            
+
             # Save every 100 successful records
             if save_counter >= 100 or i + batch_size >= total_urls:
                 if pending_data:
-                    self.append_data_to_excel_batch(pending_data)
-                    print(f"💾 Saved {len(pending_data)} records to Excel")
+                    self.append_data_to_csv_batch(pending_data, csv_file)
+                    print(f"💾 Saved {len(pending_data)} records to CSV")
                     pending_data = []
                     save_counter = 0
-            
+
             # Progress stats
             batch_time = time.time() - batch_start
             print(f"⏱️ Batch completed in {batch_time:.1f}s")
-            
             if batch_time > 0:
                 print(f"🎯 Batch speed: {len(batch_urls)/batch_time:.1f} URLs/sec")
-            
+
             # ETA calculation
             if i + batch_size < total_urls:
                 elapsed = time.time() - start_time
@@ -475,8 +518,8 @@ class UltraFastBulkDataExtraction:
         print(f"⏱️ Total time: {total_time/60:.1f} minutes")
         if total_time > 0:
             print(f"⚡ Average speed: {self.processed_count/total_time:.2f} URLs/second")
-        print(f"💾 Excel file: {self.output_file}")
-        
+        print(f"💾 CSV file: {csv_file}")
+
         # Save failed URLs
         if self.failed_urls:
             failed_df = pd.DataFrame(self.failed_urls, columns=['failed_urls'])
@@ -484,32 +527,41 @@ class UltraFastBulkDataExtraction:
             failed_df.to_csv(failed_file, index=False)
             print(f"📝 Failed URLs saved to: {failed_file}")
 
+    def csv_to_excel(self, csv_file, excel_file):
+        """Convert CSV file to Excel file"""
+        df = pd.read_csv(csv_file)
+        df.to_excel(excel_file, index=False)
+        print(f"✅ Converted {csv_file} to {excel_file}")
 
 # Main execution
 if __name__ == "__main__":
     print("🚀 Starting UltraFast Bulk Data Extraction...")
-    print("📍 Continuing from row 50082...")
-    
+    print("📍 Starting from row 114990 in CSV, processing next 30,000 URLs, saving to CSV.")
+
     csv_file = "URL.csv"
-    
+    output_csv = "bulk_drug_114990_30k.csv"
+    output_excel = "bulk_drug_114990_30k.xlsx"
+
     # Check if CSV file exists
     if not os.path.exists(csv_file):
         print(f"❌ CSV file not found: {csv_file}")
         print("Please make sure the CSV file is in the same directory as this script.")
         exit(1)
-    
+
     extractor = UltraFastBulkDataExtraction(
         csv_file_path=csv_file,
-        output_file="bulk_drug_2_data.xlsx"
+        output_file=output_csv  # Not used for CSV, but kept for compatibility
     )
-    
-    # Check current status
-    current_rows = extractor.get_current_excel_row_count()
-    print(f"📊 Current Excel file has {current_rows} rows of data")
-    
-    # Start processing from row 61470 (continuing from where it left off)
+    extractor.create_csv_with_headers(output_csv)  # Always create new CSV file with headers
+
+    # Start processing from row 114990, process next 30,000 URLs, save to CSV
     extractor.ultra_fast_process(
-        start_from=61470,     # Continue from row 61470
-        batch_size=100,       # Process 100 URLs per batch
-        max_workers=10        # Use 10 threads
+        start_from=114990,
+        batch_size=100,
+        max_workers=10,
+        limit=30000,
+        csv_file=output_csv
     )
+
+    # After processing, convert CSV to Excel
+    extractor.csv_to_excel(output_csv, output_excel)
