@@ -2,6 +2,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 import os
 import time
 
@@ -24,6 +25,24 @@ def login(driver, email='deepakpant9759@gmail.com', Password='9759894066'):
     Password_input.send_keys(Password)
     Click_button = driver.find_element(By.CSS_SELECTOR,value = 'button[id="login-submit"]')
     Click_button.click()
+    time.sleep(5)  
+    nevigate_to(driver)
+
+def nevigate_to(driver):
+    time.sleep(5)
+    driver.find_element(By.XPATH,"//a[@title='Bot Borad']").click()
+    time.sleep(5)
+def Task_todo(driver):
+    time.sleep(5)
+    driver.find_element(By.XPATH,"//button[@data-testid='list-add-card-button' and @aria-label='Add a card in To Do']").click()
+    time.sleep(2)
+    card_input = driver.find_element(By.XPATH, "//textarea[@data-testid='list-card-composer-textarea']")
+    card_input.click()
+    time.sleep(1)
+    card_input.send_keys("First time successful")
+    time.sleep(1)
+    card_input.send_keys(Keys.RETURN)  # Submit the card
+    time.sleep(3)
 
 def main():
     CHROME_DRIVER_PATH = os.path.join(os.getcwd(), 'chromedriver.exe')
@@ -38,6 +57,7 @@ def main():
         driver.get("https://trello.com/")
         time.sleep(5)  # Wait for the page to load
         login(driver)
+        Task_todo(driver)
     except Exception as e:
         print(f"Error occurred: {e}")
         driver.quit()
