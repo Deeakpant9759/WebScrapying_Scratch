@@ -35,7 +35,6 @@ def screenshot(driver):
     os.makedirs(os.path.dirname(fpath), exist_ok=True)
     driver.save_screenshot(fpath)
 
-
 def nevigate_to(driver):
     time.sleep(4)
     driver.find_element(By.XPATH,"//a[@title='Bot Borad']").click()
