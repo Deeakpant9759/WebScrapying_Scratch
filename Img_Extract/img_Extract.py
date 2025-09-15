@@ -7,9 +7,10 @@ from pathlib import Path
 data = []
 df = pd.DataFrame(data)
 x = int(input("Enter Number of Pages to Scrape: "))
+url_input = input("Enter URL: ")
 Img_folder = input("Enter Folder Name: ")
 excel_name = Img_folder
-url_input = input("Enter URL: ")
+
 x += 1
 useragent = fake_useragent.UserAgent().random
 headers = {'user-agent': useragent}
