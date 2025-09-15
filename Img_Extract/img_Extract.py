@@ -34,8 +34,8 @@ for i in range(1, x):
             products.append({"name": name, "image_url": img_url})
 
     # Create folder for downloads
-    
-    Path(f"downloaded_products\\{Img_folder}").mkdir(parents=True, exist_ok=True)
+
+    Path(f"C:\\Users\\MICILMEDS\\Battel_with_Codes\\WebScrapying_Scratch\\Img_Extract\\downloaded_products\\{Img_folder}").mkdir(parents=True, exist_ok=True)
 
     # Download images
     for i, p in enumerate(products, start=1):
@@ -46,7 +46,7 @@ for i in range(1, x):
             response = requests.get(url, timeout=10)
             response.raise_for_status()
 
-            file_path = os.path.join(f"downloaded_products\\{Img_folder}", f"{name}.jpg")
+            file_path = os.path.join(f"C:\\Users\\MICILMEDS\\Battel_with_Codes\\WebScrapying_Scratch\\Img_Extract\\downloaded_products\\{Img_folder}", f"{name}.jpg")
             with open(file_path, "wb") as f:
                 f.write(response.content)
 
@@ -56,4 +56,4 @@ for i in range(1, x):
         except Exception as e:
             print(f"❌ {i}. Failed {url} ({e})")
     df = pd.concat([df, pd.DataFrame(products)], ignore_index=True)
-    df.to_excel(f"{excel_name}.xlsx", index=False)  # Save data to Excel
+    df.to_excel(f"C:\\Users\\MICILMEDS\\Battel_with_Codes\\WebScrapying_Scratch\\Img_Extract\\Image Data\\{excel_name}.xlsx", index=False)  # Save data to Excel
